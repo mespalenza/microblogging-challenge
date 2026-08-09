@@ -40,6 +40,7 @@ Timeline
 - Si dos tweets tienen el mismo created_at, se ordenan por tweet_id descendente
 - Cuando no existen tweets para mostrar, se devuelve una colección vacía
 - El timeline se devuelve de forma limitada y paginada
+- Cada página devuelve 20 tweets por defecto y permite solicitar entre 1 y 100
 
 
 Fuera de alcance

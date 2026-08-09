@@ -181,6 +181,8 @@ posición entre consultas con los mismos datos.
 El timeline utiliza paginación por cursor, también conocida como keyset
 pagination.
 
+El tamaño predeterminado de página es 20 y el máximo permitido es 100.
+
 El cursor representa la posición del último tweet devuelto y contiene
 lógicamente:
 
