@@ -36,4 +36,20 @@ Timeline
 - El timeline contiene solamente los tweets publicados por los usuarios seguidos
 - Los tweets propios no se incluyen
 - Se incluyen los tweets publicados antes de comenzar a seguir a un usuario
-- Los tweets se ordenan desde el más re
+- Los tweets se ordenan desde el más reciente hasta el más antiguo
+- Si dos tweets tienen el mismo created_at, se ordenan por tweet_id descendente
+- Cuando no existen tweets para mostrar, se devuelve una colección vacía
+- El timeline se devuelve de forma limitada y paginada
+
+
+Fuera de alcance
+
+Esta versión no incluye:
+
+- Registro, autenticación o manejo de sesiones
+- Administración del ciclo de vida de los usuarios
+- Edición o eliminación de tweets
+- Dejar de seguir usuarios
+- Likes, respuestas, retweets o notificaciones
+- Perfiles de usuario
+- Desarrollo de frontend
