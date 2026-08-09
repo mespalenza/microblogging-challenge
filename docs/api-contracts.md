@@ -274,11 +274,11 @@ En la respuesta:
 - `next_cursor` es un string cuando existe una página siguiente.
 - `next_cursor` es `null` cuando no quedan más páginas.
 
-El cursor debe representar la información necesaria para conocer:
+El cursor representa:
 
-- Cuándo comenzó el recorrido.
-- Cuál fue el último tweet entregado.
-- Desde qué posición debe continuar la página siguiente.
+- El `created_at` del último tweet entregado.
+- El `tweet_id` del último tweet entregado.
+- La posición desde la que debe continuar la página siguiente.
 
 ### Respuesta exitosa
 
@@ -289,7 +289,7 @@ El cursor debe representar la información necesaria para conocer:
   "tweets": [
     {
       "id": "550e8400-e29b-41d4-a716-446655440002",
-      "user_id": "user-123",
+      "user_id": "user-789",
       "content": "Primer tweet",
       "date": "2026-08-08T23:30:00Z"
     },
@@ -335,9 +335,9 @@ Se devuelven los tweets restantes y `next_cursor` pasa a `null`:
 
 ### Consistencia durante la paginación
 
-- Los tweets publicados después de solicitar la primera página no se incorporan al
-  recorrido actual.
-- Para obtener tweets nuevos, el cliente debe solicitar nuevamente la primera página.
+- Los tweets publicados después de solicitar la primera página normalmente quedan
+  antes del cursor y no aparecen en las páginas siguientes.
+- Para obtener los tweets nuevos, el cliente debe solicitar nuevamente la primera página.
 - No se garantiza una fotografía inmutable de las relaciones de seguimiento.
 - Si el usuario comienza a seguir a otra persona durante el recorrido, las páginas
   posteriores pueden reflejar el cambio.
