@@ -1,0 +1,47 @@
+REGLAS DE NEGOCIO Y SUPUESTOS
+
+Alcance
+
+La aplicación permite:
+
+- Publicar un tweet
+- Seguir a otro usuario
+- Consultar un timeline con los tweets de los usuarios seguidos
+
+
+Supuestos y reglas de negocio
+
+Tweets
+
+- Un tweet puede contener como máximo 280 caracteres
+- No se permiten tweets vacíos ni compuestos únicamente por espacios
+- Los espacios al comienzo y al final se ignoran al validar y guardar el tweet
+
+Seguimiento
+
+- Un usuario no puede seguirse a sí mismo
+- Seguir más de una vez al mismo usuario es una operación idempotente
+- Todos los identificadores de usuario recibidos se consideran válidos, según lo indicado en el enunciado
+- No se requiere registro, autenticación ni manejo de sesiones
+
+Timeline
+
+- El timeline contiene los tweets publicados por los usuarios seguidos
+- Los tweets propios no se incluyen
+- Los tweets se ordenan desde el más reciente hasta el más antiguo
+- Se incluyen los tweets publicados antes de comenzar a seguir al usuario
+- Si dos tweets tienen la misma fecha de publicación, se utiliza su identificador como criterio secundario de orden
+- Cuando no existen tweets para mostrar, se devuelve una colección vacía
+- El timeline se devuelve de forma paginada
+
+
+Fuera de alcance
+
+Esta versión no incluye:
+
+- Registro, autenticación o manejo de sesiones
+- Edición o eliminación de tweets
+- Dejar de seguir usuarios
+- Likes, respuestas, retweets o notificaciones
+- Perfiles de usuario
+- Desarrollo de frontend
