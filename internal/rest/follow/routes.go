@@ -1,0 +1,5 @@
+package follow
+
+func Router() {
+
+}
