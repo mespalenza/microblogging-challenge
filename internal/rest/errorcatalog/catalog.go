@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/mespalenza/microblogging-challenge/internal/follow"
 	"github.com/mespalenza/microblogging-challenge/internal/tweet"
 )
 
@@ -37,6 +38,13 @@ func From(err error) Error {
 			Status:  http.StatusBadRequest,
 			Code:    "content_too_long",
 			Message: "content must not exceed 280 characters",
+		}
+
+	case errors.Is(err, follow.ErrCannotFollowSelf):
+		return Error{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    "cannot_follow_self",
+			Message: "a user cannot follow themselves",
 		}
 
 	default:
