@@ -28,16 +28,30 @@ type TweetRequest struct {
 
 ### Validaciones y normalización
 
-- `user_id` y `content` son obligatorios.
-- Ambos deben ser strings.
+- `user_id` y `content` deben contener valores válidos.
+- Los valores no nulos deben ser strings.
+- Un campo ausente o con valor `null` se interpreta como un string vacío y recibe el mismo tratamiento que un campo presente con valor vacío.
 - Los campos desconocidos provocan el rechazo del request.
 - `user_id` se normaliza quitando espacios iniciales y finales.
-- Un `user_id` vacío o compuesto únicamente por espacios no es válido.
+- Un `user_id` ausente, vacío o compuesto únicamente por espacios no es válido.
 - `content` se normaliza quitando espacios iniciales y finales.
 - Se guarda y devuelve el contenido normalizado.
-- Un `content` vacío o compuesto únicamente por espacios no es válido.
-- El límite máximo es de 280 caracteres después de normalizar.
+- Un `content` ausente, vacío o compuesto únicamente por espacios no es válido.
+- El límite máximo es de 280 runas después de normalizar.
 - Los caracteres se cuentan como runas Unicode, no como bytes.
+
+#### Decisión sobre campos ausentes
+
+El DTO HTTP utiliza campos `string`.
+
+Durante la decodificación JSON, Go representa un campo ausente, con valor `null` o presente con valor vacío mediante el zero value `""`.
+
+La API no distingue entre ambos casos porque producen el mismo resultado desde el punto de vista de las reglas del caso de uso:
+
+- `user_id` ausente o vacío devuelve `invalid_user_id`.
+- `content` ausente o vacío devuelve `invalid_content`.
+
+Esta decisión simplifica el DTO HTTP y evita agregar estados que no modifican el comportamiento del negocio.
 
 #### Ejemplo de normalización
 
@@ -83,15 +97,12 @@ Se procesa como:
 #### `400 Bad Request`
 
 - JSON con sintaxis inválida.
-- Campo obligatorio ausente.
 - Campo con tipo incorrecto.
 - Campo desconocido.
-
-#### `422 Unprocessable Content`
-
-- `user_id` vacío o compuesto únicamente por espacios.
-- `content` vacío o compuesto únicamente por espacios.
-- `content` con más de 280 runas después de normalizar.
+- Más de un valor JSON o contenido sobrante.
+- `user_id` ausente, `null` o vacío devuelve `invalid_user_id`.
+- `content` ausente, `null` o vacío devuelve `invalid_content`.
+- `content` contiene más de 280 runas después de normalizar.
 
 #### `500 Internal Server Error`
 
@@ -110,20 +121,22 @@ Se procesa como:
 
 #### Códigos de error
 
-- `invalid_json`: el JSON tiene sintaxis inválida.
-- `missing_required_field`: falta un campo obligatorio.
+- `invalid_json`: el JSON tiene sintaxis inválida, contiene más de un valor o tiene contenido sobrante.
 - `invalid_field_type`: un campo tiene un tipo incorrecto.
 - `unknown_field`: el request contiene un campo desconocido.
-- `invalid_user_id`: `user_id` está vacío después de normalizar.
-- `invalid_content`: `content` está vacío después de normalizar.
+- `invalid_user_id`: `user_id` está ausente, es `null`, está vacío o queda vacío después de normalizar.
+- `invalid_content`: `content` está ausente, es `null`, está vacío o queda vacío después de normalizar.
 - `content_too_long`: `content` supera las 280 runas.
 - `internal_error`: ocurrió un error interno inesperado.
 
 Si existen varios errores simultáneos:
 
 - Se devuelve solamente el primero encontrado.
-- La respuesta corresponde a la primera validación que falla.
-- El orden concreto de las validaciones debe ser determinista durante la implementación.
+- El orden de validación es determinista.
+- Primero se procesan los errores de decodificación.
+- Después se procesan los campos desconocidos y los tipos incorrectos.
+- Luego el servicio valida `user_id`, `content` y su longitud, en ese orden.
+
 
 ## 2. Follow User
 
