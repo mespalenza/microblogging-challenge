@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mespalenza/microblogging-challenge/internal/follow"
+	"github.com/mespalenza/microblogging-challenge/internal/timeline"
 	"github.com/mespalenza/microblogging-challenge/internal/tweet"
 )
 
@@ -46,7 +47,12 @@ func From(err error) Error {
 			Code:    "cannot_follow_self",
 			Message: "a user cannot follow themselves",
 		}
-
+	case errors.Is(err, timeline.ErrLimitOutOfRange):
+		return Error{
+			Status:  http.StatusUnprocessableEntity,
+			Code:    "limit_out_of_range",
+			Message: "limit must be between 1 and 100",
+		}
 	default:
 		return Error{
 			Status:  http.StatusInternalServerError,
