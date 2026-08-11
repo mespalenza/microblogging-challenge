@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/mespalenza/microblogging-challenge/internal/follow"
@@ -30,5 +31,26 @@ func TestFollowRepository(t *testing.T) {
 	ids, err = r.FindFollowedIDs(ctx, "u1")
 	if err != nil || len(ids) != 2 {
 		t.Fatalf("ids=%v err=%v", ids, err)
+	}
+}
+
+func TestFollowRepository_CanceledContext(t *testing.T) {
+	repository := NewFollowRepository()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	created, err := repository.SaveFollow(ctx, follow.Follow{FollowerID: "u1", FollowedID: "u2"})
+	if created || !errors.Is(err, context.Canceled) {
+		t.Fatalf("SaveFollow() created=%v error=%v", created, err)
+	}
+
+	ids, err := repository.FindFollowedIDs(ctx, "u1")
+	if ids != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindFollowedIDs() ids=%v error=%v", ids, err)
+	}
+
+	ids, err = repository.FindFollowedIDs(context.Background(), "u1")
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("canceled save changed state: ids=%v error=%v", ids, err)
 	}
 }

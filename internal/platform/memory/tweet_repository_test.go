@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -25,6 +26,27 @@ func TestTweetRepository_SaveAndFindByID(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("FindByID() = %+v, want %+v", got, want)
+	}
+}
+
+func TestTweetRepository_CanceledContext(t *testing.T) {
+	repository := NewTweetRepository()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	want := tweet.Tweet{ID: "tweet-1", UserID: "user-1"}
+
+	if err := repository.Save(ctx, want); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Save() error=%v", err)
+	}
+	if _, err := repository.FindByID(ctx, want.ID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindByID() error=%v", err)
+	}
+	if got, err := repository.FindByAuthors(ctx, []string{want.UserID}, nil, 20); got != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("FindByAuthors() tweets=%v error=%v", got, err)
+	}
+
+	if _, err := repository.FindByID(context.Background(), want.ID); err == nil {
+		t.Fatal("canceled save changed state")
 	}
 }
 

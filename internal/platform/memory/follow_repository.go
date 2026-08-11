@@ -21,6 +21,9 @@ func NewFollowRepository() *FollowRepository {
 func (r *FollowRepository) SaveFollow(ctx context.Context, value follow.Follow) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 
 	followedUsers, exists := r.relation[value.FollowerID]
 	if !exists {
@@ -39,10 +42,16 @@ func (r *FollowRepository) SaveFollow(ctx context.Context, value follow.Follow) 
 func (r *FollowRepository) FindFollowedIDs(ctx context.Context, followerID string) ([]string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	if followedUsers, exists := r.relation[followerID]; exists {
 		followedIDs := make([]string, 0, len(followedUsers))
 		for followedID := range followedUsers {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			followedIDs = append(followedIDs, followedID)
 		}
 		return followedIDs, nil
