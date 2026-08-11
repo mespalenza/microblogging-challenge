@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/mespalenza/microblogging-challenge/internal/follow"
+	"github.com/mespalenza/microblogging-challenge/internal/timeline"
 	"github.com/mespalenza/microblogging-challenge/internal/tweet"
 )
 
@@ -19,6 +21,8 @@ func TestFrom(t *testing.T) {
 		{name: "invalid user ID", err: tweet.ErrInvalidUserID, want: Error{http.StatusBadRequest, "invalid_user_id", "user_id must not be empty"}},
 		{name: "wrapped invalid content", err: fmt.Errorf("validate: %w", tweet.ErrInvalidContent), want: Error{http.StatusBadRequest, "invalid_content", "content must not be empty"}},
 		{name: "content too long", err: tweet.ErrContentTooLong, want: Error{http.StatusBadRequest, "content_too_long", "content must not exceed 280 characters"}},
+		{name: "cannot follow self", err: follow.ErrCannotFollowSelf, want: Error{http.StatusUnprocessableEntity, "cannot_follow_self", "a user cannot follow themselves"}},
+		{name: "limit out of range", err: timeline.ErrLimitOutOfRange, want: Error{http.StatusUnprocessableEntity, "limit_out_of_range", "limit must be between 1 and 100"}},
 		{name: "unexpected error", err: errors.New("database unavailable"), want: Error{http.StatusInternalServerError, "internal_error", "an unexpected error occurred"}},
 	}
 

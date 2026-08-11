@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/mespalenza/microblogging-challenge/internal/timeline"
 	"github.com/mespalenza/microblogging-challenge/internal/tweet"
 )
 
@@ -23,6 +25,34 @@ func TestTweetRepository_SaveAndFindByID(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("FindByID() = %+v, want %+v", got, want)
+	}
+}
+
+func TestTweetRepository_FindByAuthors(t *testing.T) {
+	repository := NewTweetRepository()
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	values := []tweet.Tweet{
+		{ID: "b", UserID: "u1", CreatedAt: createdAt},
+		{ID: "a", UserID: "u1", CreatedAt: createdAt},
+		{ID: "c", UserID: "u2", CreatedAt: createdAt.Add(time.Minute)},
+		{ID: "ignored", UserID: "u3", CreatedAt: createdAt.Add(time.Hour)},
+	}
+	for _, value := range values {
+		if err := repository.Save(ctx, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := repository.FindByAuthors(ctx, []string{"u1", "u2"}, nil, 2)
+	if err != nil || len(got) != 2 || got[0].ID != "c" || got[1].ID != "b" {
+		t.Fatalf("FindByAuthors() = %+v, err=%v", got, err)
+	}
+
+	cursor := &timeline.CursorPosition{CreatedAt: createdAt, TweetID: "b"}
+	got, err = repository.FindByAuthors(ctx, []string{"u1", "u2"}, cursor, 10)
+	if err != nil || len(got) != 1 || got[0].ID != "a" {
+		t.Fatalf("FindByAuthors(cursor) = %+v, err=%v", got, err)
 	}
 }
 
