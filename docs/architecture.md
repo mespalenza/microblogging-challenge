@@ -298,6 +298,187 @@ La clave primaria compuesta cumple dos objetivos:
 No se agrega un índice por `followed_id`, porque consultar quiénes siguen a un
 usuario no es un patrón de acceso requerido por el challenge.
 
+## Persistencia para un entorno productivo
+
+Para simplificar la ejecución del challenge, la implementación actual utiliza
+repositorios en memoria.
+
+Esta decisión permite ejecutar la aplicación sin infraestructura adicional, pero
+los datos se pierden cuando el proceso se reinicia. Tampoco busca resolver
+durabilidad, replicación ni escalado horizontal.
+
+Para una primera versión productiva elegiría PostgreSQL.
+
+### Por qué PostgreSQL
+
+El modelo tiene relaciones y restricciones claras:
+
+- Cada tweet pertenece a un autor.
+- Un usuario puede seguir a varios usuarios.
+- La relación `(follower_id, followed_id)` debe ser única.
+- Un usuario no puede seguirse a sí mismo.
+- El timeline consulta tweets de varios autores y necesita un orden global.
+
+PostgreSQL se utilizaría como persistencia principal de toda la aplicación,
+tanto para los tweets como para las relaciones de seguimiento.
+
+Permite representar las reglas del modelo mediante claves primarias,
+restricciones e índices compuestos. También permite mantener la idempotencia de
+los follows y consultar el timeline utilizando joins y paginación por cursor.
+
+Se elige una base relacional porque los datos tienen una estructura estable y
+las relaciones forman parte importante de los patrones de acceso.
+
+Una base NoSQL podría ser apropiada si el timeline estuviera previamente
+materializado o si existieran requisitos concretos de distribución y volumen.
+Sin embargo, para el fan-out en lectura actual probablemente sería necesario
+consultar por separado los tweets de cada autor y combinarlos en la aplicación.
+
+Como no se definieron volúmenes, latencia esperada ni un read/write ratio, no
+agregaría esa complejidad sin métricas que la justifiquen.
+
+### Esquema conceptual
+
+```sql
+CREATE TABLE tweets (
+    tweet_id UUID PRIMARY KEY,
+    author_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    CHECK (char_length(content) BETWEEN 1 AND 280)
+);
+
+CREATE INDEX idx_tweets_author_timeline
+    ON tweets (
+        author_id,
+        created_at DESC,
+        tweet_id DESC
+    );
+```
+
+```sql
+CREATE TABLE follows (
+    follower_id TEXT NOT NULL,
+    followed_id TEXT NOT NULL,
+    PRIMARY KEY (follower_id, followed_id),
+    CHECK (follower_id <> followed_id)
+);
+```
+
+No se crea una tabla de usuarios porque la consigna considera válidos todos los
+identificadores recibidos y deja fuera de alcance su administración.
+
+### Consultas principales
+
+#### Publicar un tweet
+
+```sql
+INSERT INTO tweets (
+    tweet_id,
+    author_id,
+    content,
+    created_at
+)
+VALUES ($1, $2, $3, $4);
+```
+
+#### Seguir a un usuario
+
+```sql
+INSERT INTO follows (
+    follower_id,
+    followed_id
+)
+VALUES ($1, $2)
+ON CONFLICT (follower_id, followed_id) DO NOTHING
+RETURNING follower_id;
+```
+
+Si devuelve una fila, la relación fue creada.
+
+Si no devuelve filas, la relación ya existía. De esta manera se mantiene la
+idempotencia del endpoint.
+
+#### Obtener los usuarios seguidos
+
+```sql
+SELECT followed_id
+FROM follows
+WHERE follower_id = $1;
+```
+
+La clave primaria `(follower_id, followed_id)` permite buscar por
+`follower_id` sin agregar otro índice.
+
+#### Primera página del timeline
+
+```sql
+SELECT
+    t.tweet_id,
+    t.author_id,
+    t.content,
+    t.created_at
+FROM follows AS f
+JOIN tweets AS t
+    ON t.author_id = f.followed_id
+WHERE f.follower_id = $1
+ORDER BY
+    t.created_at DESC,
+    t.tweet_id DESC
+LIMIT $2;
+```
+
+El límite utilizado es `page_size + 1` para determinar si existe una página
+siguiente.
+
+#### Páginas siguientes
+
+```sql
+SELECT
+    t.tweet_id,
+    t.author_id,
+    t.content,
+    t.created_at
+FROM follows AS f
+JOIN tweets AS t
+    ON t.author_id = f.followed_id
+WHERE f.follower_id = $1
+  AND (
+      t.created_at < $2
+      OR (
+          t.created_at = $2
+          AND t.tweet_id < $3
+      )
+  )
+ORDER BY
+    t.created_at DESC,
+    t.tweet_id DESC
+LIMIT $4;
+```
+
+Los parámetros `$2` y `$3` representan la posición incluida en el cursor. La
+comparación es exclusiva para evitar repetir el último tweet de la página
+anterior.
+
+### Escalabilidad y evolución
+
+El costo del fan-out en lectura aumenta cuando un usuario sigue a muchas
+cuentas, porque PostgreSQL debe combinar tweets de varios autores para construir
+el orden global.
+
+Antes de cambiar la estrategia mediría:
+
+- Cantidad promedio de usuarios seguidos.
+- Frecuencia de lectura y escritura.
+- Latencia del timeline.
+- Cantidad de tweets recorridos.
+- Planes de ejecución de las consultas.
+
+Si las métricas mostraran problemas, se podría evaluar una estrategia de
+fan-out en escritura o una solución híbrida. Esas alternativas agregarían
+duplicación de datos y procesamiento adicional, por lo que quedan fuera del
+alcance actual.
+
 ## Limitaciones conocidas
 
 - El costo de obtener el timeline crece con la cantidad de usuarios seguidos.
