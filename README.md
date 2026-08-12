@@ -35,6 +35,39 @@ El servidor queda disponible en:
 http://localhost:8080
 ```
 
+## Ejecución con Docker
+
+Para construir la imagen desde la raíz del proyecto:
+
+```bash
+docker build -t microblogging-api:local .
+```
+
+Para ejecutar el contenedor:
+
+```bash
+docker run --rm \
+  --name microblogging-api \
+  -p 8080:8080 \
+  microblogging-api:local
+```
+
+La API queda disponible en:
+
+```text
+http://localhost:8080
+```
+
+Para detener el contenedor, presionar `Control + C` en la terminal donde se está ejecutando.
+
+También puede detenerse desde otra terminal:
+
+```bash
+docker stop microblogging-api
+```
+
+La persistencia es en memoria. Los tweets y las relaciones de seguimiento se pierden cuando se elimina o reinicia el contenedor.
+
 ## Endpoints
 
 | Método | Endpoint | Descripción |
