@@ -19,6 +19,305 @@ Por eso se elige una solución simple para el alcance del challenge y se dejan
 documentadas sus limitaciones. Si existieran métricas reales, las decisiones
 podrían volver a evaluarse.
 
+## Arquitectura productiva propuesta
+
+La implementación entregada utiliza repositorios en memoria para simplificar la
+ejecución del challenge. También utiliza fan-out en lectura: el timeline se
+construye cuando el usuario lo consulta combinando los tweets de las cuentas que
+sigue.
+
+A continuación se describe una primera versión productiva y una posible evolución
+si las métricas muestran que la lectura del timeline se convierte en un cuello de
+botella.
+
+Los componentes mencionados en esta sección forman parte del diseño propuesto y
+no están incluidos en la implementación actual.
+
+### Primera etapa productiva
+
+Para una primera versión productiva mantendría una arquitectura simple:
+
+- La API Go empaquetada en Docker.
+- La aplicación ejecutándose en AWS ECS Fargate.
+- Un Application Load Balancer distribuyendo las solicitudes.
+- PostgreSQL en AWS RDS como base de datos.
+- Fan-out en lectura para construir el timeline.
+
+No agregaría inicialmente colas, workers ni otra base de datos porque la consigna
+no proporciona métricas concretas que justifiquen esa complejidad.
+
+![Primera etapa productiva](first-production-stage.png)
+
+#### Ejecución de la aplicación
+
+Mantendría la API como una aplicación Go empaquetada en Docker, igual que en la
+implementación entregada.
+
+La ejecutaría en ECS Fargate, que permite correr contenedores sin administrar
+directamente los servidores donde se ejecutan. Es un modelo similar al que
+utilicé con Fury, donde la infraestructura estaba abstraída y el equipo se
+concentraba principalmente en desarrollar y configurar la aplicación.
+
+Delante de la aplicación utilizaría un Application Load Balancer. Su función
+sería recibir las solicitudes HTTP y distribuirlas entre las distintas tasks de
+la API.
+
+Las tasks no guardarían datos localmente. Una solicitud puede ser atendida por
+cualquier instancia y estas pueden crearse, reemplazarse o eliminarse según la
+demanda.
+
+Si aumenta el tráfico, se pueden levantar más tasks. Si disminuye, se puede
+reducir su cantidad. La persistencia queda fuera de los contenedores para evitar
+la pérdida de información cuando una instancia es reemplazada.
+
+#### Base de datos
+
+Para esta etapa utilizaría PostgreSQL mediante AWS RDS.
+
+Elegí una base relacional porque los datos tienen una estructura definida y
+existen reglas que conviene garantizar desde la base. Por ejemplo, una relación
+de seguimiento no debe estar duplicada y un usuario no puede seguirse a sí
+mismo.
+
+PostgreSQL permite guardar tweets y relaciones de seguimiento, aplicar
+restricciones de integridad, ordenar los resultados y utilizar paginación por
+cursor.
+
+PostgreSQL sería la fuente de verdad:
+
+- La tabla `tweets` contiene los tweets originales.
+- La tabla `follows` contiene las relaciones de seguimiento.
+
+RDS permite usar PostgreSQL sin administrar directamente la infraestructura
+donde se ejecuta. La aplicación continúa conectándose a una base PostgreSQL
+normal, mientras que tareas operativas como backups y reemplazo de
+infraestructura pueden quedar administradas por AWS.
+
+No elegiría una base KVS solamente por la cantidad esperada de usuarios. Una KVS
+escala bien los accesos por clave, pero requiere diseñar el almacenamiento
+alrededor de consultas específicas y no resuelve por sí sola la combinación de
+tweets de varios autores.
+
+#### Timeline en la primera etapa
+
+En esta etapa mantendría el fan-out en lectura utilizado por la implementación.
+
+Cuando un usuario consulta su timeline, la aplicación:
+
+1. Busca en PostgreSQL los usuarios que sigue.
+2. Busca los tweets publicados por esos usuarios.
+3. Combina y ordena los resultados.
+4. Aplica la paginación por cursor.
+5. Devuelve la página solicitada.
+
+Esta estrategia mantiene simple la publicación de tweets y evita duplicar datos.
+También permite que los tweets anteriores de una cuenta aparezcan
+automáticamente después de seguirla.
+
+Su principal limitación es que el costo de lectura aumenta con la cantidad de
+cuentas seguidas y con el volumen de tweets que se debe combinar.
+
+Antes de cambiar la estrategia mediría:
+
+- Latencia del endpoint de timeline.
+- Cantidad de usuarios seguidos por usuario.
+- Relación entre lecturas y publicaciones.
+- Cantidad de tweets analizados por consulta.
+- Uso de CPU y conexiones de PostgreSQL.
+- Planes de ejecución de las consultas.
+
+### Evolución optimizada para lecturas
+
+Si las métricas muestran que construir el timeline en cada consulta es el
+principal cuello de botella, evolucionaría hacia timelines materializados.
+
+Un timeline materializado es una vista preparada previamente para cada usuario.
+El trabajo de combinar los tweets se realiza después de una publicación, en
+lugar de repetirse cada vez que alguien consulta su timeline.
+
+Para esta evolución agregaría:
+
+- AWS SQS para comunicar trabajos pendientes.
+- Workers ejecutados en ECS Fargate.
+- DynamoDB para almacenar los timelines materializados.
+
+PostgreSQL continuaría siendo la fuente de verdad. DynamoDB no reemplazaría a
+PostgreSQL ni se utilizaría solamente como cache. Guardaría una vista durable y
+reconstruible, preparada específicamente para leer el timeline.
+
+![Evolución optimizada para lecturas](read-optimized-evolution.png)
+
+#### Publicación de un tweet
+
+El flujo de publicación sería:
+
+1. La API guarda el tweet original en PostgreSQL.
+2. La API envía a SQS un evento que indica que el tweet fue creado.
+3. La API confirma la publicación sin esperar la actualización de todos los
+   timelines.
+4. Un worker recibe el evento desde SQS.
+5. El worker consulta en PostgreSQL los seguidores del autor.
+6. El worker agrega el tweet al timeline de cada seguidor en DynamoDB.
+
+El worker consulta PostgreSQL porque allí se encuentran los tweets originales y
+las relaciones de seguimiento. Escribe en DynamoDB porque allí se encuentran
+las vistas preparadas para la lectura.
+
+Esta estrategia se conoce como fan-out en escritura: se realiza más trabajo
+después de publicar para reducir el trabajo necesario al leer.
+
+#### Lectura del timeline
+
+Cuando un usuario consulta su timeline:
+
+1. La solicitud llega a la API.
+2. La API consulta en DynamoDB el timeline preparado para ese usuario.
+3. DynamoDB devuelve las primeras entradas según el límite y el cursor.
+4. La API devuelve el resultado al cliente.
+
+Este es el flujo principal para los timelines materializados. Si se utiliza la
+estrategia híbrida, la API también consulta los tweets recientes de las cuentas
+masivas y los combina con los resultados de DynamoDB. Esto aumenta la
+complejidad del orden y la paginación.
+
+En DynamoDB utilizaría:
+
+```text
+Partition Key = owner_id
+Sort Key      = created_at#tweet_id
+```
+
+La clave de partición agrupa las entradas del timeline de un usuario. La clave
+de ordenamiento permite obtenerlas desde la más reciente y continuar la
+paginación mediante un cursor.
+
+Como el alcance del challenge no permite editar ni eliminar tweets, cada entrada
+podría contener los datos necesarios para responder directamente:
+
+- `tweet_id`
+- `author_id`
+- `content`
+- `created_at`
+
+Esto duplica información de forma intencional para favorecer las lecturas y
+evitar una consulta adicional a PostgreSQL.
+
+#### Creación de una relación de seguimiento
+
+Con timelines materializados, al crear una relación:
+
+1. La API guarda el follow en PostgreSQL.
+2. La API envía un evento a SQS.
+3. Un worker obtiene una cantidad limitada de tweets recientes del usuario
+   seguido.
+4. El worker los agrega al timeline del nuevo seguidor en DynamoDB.
+
+Esto introduce una diferencia respecto de la implementación actual, donde todo
+el historial anterior puede consultarse mediante paginación. En una evolución
+productiva, la disponibilidad del historial más antiguo y el mecanismo para
+consultarlo deberían definirse según los requisitos del producto.
+
+#### Índice para obtener seguidores
+
+En la implementación actual solamente se necesita consultar a quién sigue un
+usuario. Para ese patrón de acceso alcanza con la clave primaria:
+
+```text
+PRIMARY KEY (follower_id, followed_id)
+```
+
+En la evolución con fan-out en escritura aparece un nuevo patrón de acceso:
+cuando se publica un tweet, el worker necesita obtener todos los seguidores del
+autor.
+
+Para resolver esa consulta agregaría el siguiente índice:
+
+```sql
+CREATE INDEX idx_follows_followed_id_follower_id
+    ON follows (followed_id, follower_id);
+```
+
+Este índice no es necesario para la implementación actual. Se incorpora como
+consecuencia de materializar los timelines mediante fan-out en escritura.
+
+#### Eventos procesados
+
+Los workers procesarían principalmente dos tipos de eventos:
+
+- `TweetCreated`: obtiene los seguidores del autor y agrega el tweet al timeline
+  materializado de cada uno.
+- `FollowCreated`: obtiene una cantidad limitada de tweets recientes del usuario
+  seguido y los agrega al timeline del nuevo seguidor.
+
+El procesamiento de `FollowCreated` permite mantener parcialmente la regla del
+challenge según la cual los tweets publicados antes del follow también aparecen
+en el timeline. En la evolución no se copiaría todo el historial, sino una
+cantidad limitada de tweets recientes.
+
+#### Consistencia eventual
+
+La actualización de los timelines sería asíncrona. Un tweet podría estar
+guardado y confirmado, pero tardar algunos segundos en aparecer en los
+timelines de los seguidores.
+
+Esto no implica perder el tweet. El dato original ya está almacenado en
+PostgreSQL. El timeline es una vista derivada que puede actualizarse después y
+reconstruirse si fuera necesario.
+
+#### Reintentos e idempotencia
+
+SQS puede entregar un mismo mensaje más de una vez. Por eso el worker debe ser
+idempotente: procesar nuevamente el evento no debe crear una entrada duplicada.
+
+La combinación de `owner_id` y `created_at#tweet_id` identifica de forma única
+cada entrada del timeline. Repetir la escritura deja el mismo estado final.
+
+#### Usuarios con millones de seguidores
+
+El fan-out en escritura puede ser demasiado costoso para un autor con millones
+de seguidores.
+
+En ese caso utilizaría una estrategia híbrida:
+
+- Para autores con una cantidad moderada de seguidores, fan-out en escritura.
+- Para autores con una cantidad masiva de seguidores, fan-out en lectura.
+- Al consultar el timeline, la aplicación combina el timeline materializado con
+  los tweets recientes de esas cuentas masivas.
+
+#### Disponibilidad y observabilidad
+
+La API y los workers podrían tener varias tasks y escalar horizontalmente. El
+balanceador enviaría tráfico solamente a instancias saludables mediante health
+checks.
+
+Como mínimo observaría:
+
+- Cantidad y latencia de requests.
+- Porcentaje de respuestas con error.
+- Uso de CPU y memoria de la API.
+- Errores y duración del procesamiento de los workers.
+
+También utilizaría logs estructurados con un identificador que permita seguir
+una operación entre la API y los workers.
+
+PostgreSQL debería contar con backups y un procedimiento de recuperación. Los
+timelines almacenados en DynamoDB son datos derivados y podrían reconstruirse
+desde los tweets y follows de PostgreSQL.
+
+### Resumen de la evolución
+
+La arquitectura no comenzaría con todos estos componentes desde el primer día.
+
+La primera etapa productiva utilizaría PostgreSQL y fan-out en lectura porque es
+más simple y coincide con la implementación entregada.
+
+Si las métricas muestran que la lectura del timeline no cumple con la latencia o
+el volumen esperado, agregaría SQS, workers y timelines materializados en
+DynamoDB.
+
+De esta manera, la complejidad se incorpora para resolver un problema medido y
+no solamente para anticipar una escala sobre la que no existen datos concretos.
+
 ## Modelo de dominio
 
 El modelo conceptual contiene tres entidades: `User`, `Tweet` y `Follow`.
