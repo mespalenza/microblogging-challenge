@@ -248,4 +248,5 @@ Durante el desarrollo se utilizó IA como herramienta de apoyo para:
 
 La implementación fue realizada de manera incremental, revisando y justificando las decisiones antes de incorporarlas.
 
-Sesión de trabajo: [enlace a la sesión compartida]
+Las sesiones de trabajo con inteligencia artificial se encuentran documentadas
+en [docs/ai-usage.md](docs/ai-usage.md).

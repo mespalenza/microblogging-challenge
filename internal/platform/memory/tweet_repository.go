@@ -90,11 +90,9 @@ func (r *TweetRepository) Save(ctx context.Context, value tweet.Tweet) error {
 
 	authorTweets := r.tweetsByAuthor[value.UserID]
 
-	insertAt := sort.Search(
-		len(authorTweets),
-		func(index int) bool {
-			return !comesBefore(authorTweets[index], value)
-		},
+	insertAt := sort.Search(len(authorTweets), func(index int) bool {
+		return !comesBefore(authorTweets[index], value)
+	},
 	)
 
 	authorTweets = append(authorTweets, tweet.Tweet{})
